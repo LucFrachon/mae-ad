@@ -23,6 +23,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+import wandb
 from torch.utils.tensorboard import SummaryWriter
 
 import models_mae
@@ -131,6 +132,9 @@ def get_args_parser():
     )
     parser.add_argument(
         "--log_dir", default="../output_dir", help="path where to tensorboard log"
+    )
+    parser.add_argument(
+        "--wandb_name", action="str", default=None, help="Leave empty for no wandb"
     )
     parser.add_argument(
         "--device", default="cuda", help="device to use for training / testing"
@@ -364,6 +368,9 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print("Training time {}".format(total_time_str))
+
+    if args.wandb_name is not None:
+        wandb.finish()
 
 
 if __name__ == "__main__":

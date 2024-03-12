@@ -18,7 +18,8 @@ from pathlib import Path
 
 import torch
 import torch.distributed as dist
-from torch._six import inf
+import wandb
+from torch import inf
 
 
 class SmoothedValue(object):
@@ -80,13 +81,23 @@ class SmoothedValue(object):
             avg=self.avg,
             global_avg=self.global_avg,
             max=self.max,
-            value=self.value)
+            value=self.value
+        )
 
 
-class MetricLogger(object):
-    def __init__(self, delimiter="\t"):
+class CombinedMetricLogger(object):
+    """
+    Logs metrics to screen and to WandB if available.
+    """
+
+    def __init__(
+        self, delimiter="\t", wandb_name=None, wandb_config=None
+    ):
         self.meters = defaultdict(SmoothedValue)
         self.delimiter = delimiter
+        self.wandb_run = wandb.init(
+            project="MAE-AD", name=wandb_name, config=wandb_config
+        ) if wandb_name is not None else None
 
     def update(self, **kwargs):
         for k, v in kwargs.items():
@@ -102,8 +113,11 @@ class MetricLogger(object):
             return self.meters[attr]
         if attr in self.__dict__:
             return self.__dict__[attr]
-        raise AttributeError("'{}' object has no attribute '{}'".format(
-            type(self).__name__, attr))
+        raise AttributeError(
+            "'{}' object has no attribute '{}'".format(
+                type(self).__name__, attr
+            )
+        )
 
     def __str__(self):
         loss_str = []
@@ -120,10 +134,14 @@ class MetricLogger(object):
     def add_meter(self, name, meter):
         self.meters[name] = meter
 
-    def log_every(self, iterable, print_freq, header=None):
+    def log_every(self, iterable, print_freq, epoch=None):
+
         i = 0
-        if not header:
-            header = ''
+        if not epoch:
+            header = 'Eval:'
+        else:
+            header = 'Epoch: [{}]'.format(epoch)
+
         start_time = time.time()
         end = time.time()
         iter_time = SmoothedValue(fmt='{avg:.4f}')
@@ -149,22 +167,45 @@ class MetricLogger(object):
                 eta_seconds = iter_time.global_avg * (len(iterable) - i)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                 if torch.cuda.is_available():
-                    print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
-                        meters=str(self),
-                        time=str(iter_time), data=str(data_time),
-                        memory=torch.cuda.max_memory_allocated() / MB))
+                    print(
+                        log_msg.format(
+                            i, len(iterable), eta=eta_string,
+                            meters=str(self),
+                            time=str(iter_time), data=str(data_time),
+                            memory=torch.cuda.max_memory_allocated() / MB
+                        )
+                    )
                 else:
-                    print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
-                        meters=str(self),
-                        time=str(iter_time), data=str(data_time)))
+                    print(
+                        log_msg.format(
+                            i, len(iterable), eta=eta_string,
+                            meters=str(self),
+                            time=str(iter_time), data=str(data_time)
+                        )
+                    )
+                if self.wandb_run is not None:
+                    e = 0 if epoch is None else epoch
+                    self.log_step_to_wandb(
+                        len(iterable) * e + i, e, self.meters
+                    )
             i += 1
             end = time.time()
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print('{} Total time: {} ({:.4f} s / it)'.format(
-            header, total_time_str, total_time / len(iterable)))
+        print(
+            '{} Total time: {} ({:.4f} s / it)'.format(
+                header, total_time_str, total_time / len(iterable)
+            )
+        )
+
+    def log_step_to_wandb(self, global_step, epoch, metrics):
+        self.wandb_run.log(
+            {
+                "step": global_step,
+                "epoch": epoch,
+                **metrics
+            }, commit=True
+        )
 
 
 def setup_for_distributed(is_master):
@@ -218,7 +259,8 @@ def init_distributed_mode(args):
         args.rank = int(os.environ['OMPI_COMM_WORLD_RANK'])
         args.world_size = int(os.environ['OMPI_COMM_WORLD_SIZE'])
         args.gpu = int(os.environ['OMPI_COMM_WORLD_LOCAL_RANK'])
-        args.dist_url = "tcp://%s:%s" % (os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'])
+        args.dist_url = "tcp://%s:%s" % (
+            os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'])
         os.environ['LOCAL_RANK'] = str(args.gpu)
         os.environ['RANK'] = str(args.rank)
         os.environ['WORLD_SIZE'] = str(args.world_size)
@@ -240,10 +282,15 @@ def init_distributed_mode(args):
 
     torch.cuda.set_device(args.gpu)
     args.dist_backend = 'nccl'
-    print('| distributed init (rank {}): {}, gpu {}'.format(
-        args.rank, args.dist_url, args.gpu), flush=True)
-    torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-                                         world_size=args.world_size, rank=args.rank)
+    print(
+        '| distributed init (rank {}): {}, gpu {}'.format(
+            args.rank, args.dist_url, args.gpu
+        ), flush=True
+    )
+    torch.distributed.init_process_group(
+        backend=args.dist_backend, init_method=args.dist_url,
+        world_size=args.world_size, rank=args.rank
+    )
     torch.distributed.barrier()
     setup_for_distributed(args.rank == 0)
 
@@ -254,12 +301,17 @@ class NativeScalerWithGradNormCount:
     def __init__(self):
         self._scaler = torch.cuda.amp.GradScaler()
 
-    def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True):
+    def __call__(
+        self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False,
+        update_grad=True
+    ):
         self._scaler.scale(loss).backward(create_graph=create_graph)
         if update_grad:
             if clip_grad is not None:
                 assert parameters is not None
-                self._scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
+                self._scaler.unscale_(
+                    optimizer
+                )  # unscale the gradients of optimizer's assigned params in-place
                 norm = torch.nn.utils.clip_grad_norm_(parameters, clip_grad)
             else:
                 self._scaler.unscale_(optimizer)
@@ -288,7 +340,11 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
     if norm_type == inf:
         total_norm = max(p.grad.detach().abs().max().to(device) for p in parameters)
     else:
-        total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]), norm_type)
+        total_norm = torch.norm(
+            torch.stack(
+                [torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]
+            ), norm_type
+        )
     return total_norm
 
 
@@ -309,19 +365,24 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler):
             save_on_master(to_save, checkpoint_path)
     else:
         client_state = {'epoch': epoch}
-        model.save_checkpoint(save_dir=args.output_dir, tag="checkpoint-%s" % epoch_name, client_state=client_state)
+        model.save_checkpoint(
+            save_dir=args.output_dir, tag="checkpoint-%s" % epoch_name,
+            client_state=client_state
+        )
 
 
 def load_model(args, model_without_ddp, optimizer, loss_scaler):
     if args.resume:
         if args.resume.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
-                args.resume, map_location='cpu', check_hash=True)
+                args.resume, map_location='cpu', check_hash=True
+            )
         else:
             checkpoint = torch.load(args.resume, map_location='cpu')
         model_without_ddp.load_state_dict(checkpoint['model'])
         print("Resume checkpoint %s" % args.resume)
-        if 'optimizer' in checkpoint and 'epoch' in checkpoint and not (hasattr(args, 'eval') and args.eval):
+        if 'optimizer' in checkpoint and 'epoch' in checkpoint and not (
+                hasattr(args, 'eval') and args.eval):
             optimizer.load_state_dict(checkpoint['optimizer'])
             args.start_epoch = checkpoint['epoch'] + 1
             if 'scaler' in checkpoint:
@@ -338,3 +399,14 @@ def all_reduce_mean(x):
         return x_reduce.item()
     else:
         return x
+
+
+def get_wandb_kwargs(args):
+    if args.wandb_name is not None:
+        kwargs = {
+            "wandb_name": args.wandb_name,
+            "wandb_config": args,
+        }
+    else:
+        kwargs = {}
+    return kwargs

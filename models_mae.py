@@ -37,7 +37,7 @@ class MaskedAutoencoderViT(nn.Module):
         mlp_ratio=4.0,
         norm_layer=nn.LayerNorm,
         norm_pix_loss=False,
-        mask_ratio=0.75,
+        inference_mask_ratio=0.25,
         lora_rank=8,
     ):
         super().__init__()
@@ -54,7 +54,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.patch_size = patch_size
         self.patches_per_side = img_size // patch_size
-        self.mask_ratio = mask_ratio
+        self.mask_ratio = inference_mask_ratio
         self.masks_per_img = max(
             int(1 / self.mask_ratio), int(1 / (1 - self.mask_ratio))
         )  # M
@@ -237,7 +237,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x_masked, mask, ids_restore
 
-    def forward_encoder(self, x, inference=False):
+    def forward_encoder(self, x, mask_ratio, inference=False):
         # append cls token
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
         cls_token_ = cls_token.clone()
@@ -257,7 +257,7 @@ class MaskedAutoencoderViT(nn.Module):
                 xi, mask_i = self.alternate_masking(xi, i)
                 ids_restore = self.ids_restore
             else:
-                xi, mask_i, ids_restore = self.random_masking(xi, self.mask_ratio)
+                xi, mask_i, ids_restore = self.random_masking(xi, mask_ratio)
 
             xi = torch.cat((cls_token, xi), dim=1)
             # apply Transformer blocks
@@ -351,8 +351,9 @@ class MaskedAutoencoderViT(nn.Module):
 
     def forward(self, imgs, mask_ratio=0.75):
         """Used during training"""
-        mask_ratio = None  # unused, only for compatibility
-        latents, masks, ids_restore = self.forward_encoder(imgs, inference=False)
+        latents, masks, ids_restore = self.forward_encoder(
+            imgs, mask_ratio, inference=False
+        )
         preds = self.forward_decoder(latents, ids_restore)
         loss = self.forward_loss(imgs, preds, masks, inference=False)
         return loss, preds, masks
