@@ -35,14 +35,14 @@ from util.pos_embed import interpolate_pos_embed
 
 def get_args_parser():
     parser = argparse.ArgumentParser("MAE pre-training", add_help=False)
+    parser.add_argument("--epochs", default=400, type=int)
     parser.add_argument(
         "--batch_size",
-        default=64,
+        default=32,
         type=int,
         help="Batch size per GPU (effective batch size is "
              "batch_size * accum_iter * # gpus",
     )
-    parser.add_argument("--epochs", default=400, type=int)
     parser.add_argument(
         "--accum_iter",
         default=1,
@@ -60,7 +60,7 @@ def get_args_parser():
         help="Name of model to train",
     )
     parser.add_argument(
-        "--freeze_non_lora", action="store_true", help="Freeze non-lora matrices"
+        "--freeze_non_lora", action="store_true", help="Freeze non-lora weights"
     )
     parser.add_argument(
         "--lora_rank", default=8, type=int, help="Rank of LoRA decomposition"
@@ -138,7 +138,7 @@ def get_args_parser():
         "--pretrained",
         type=str,
         help="Path to pre-trained model (weights only)",
-        default=None,
+        default="../checkpoints/mae_pretrain_vit_large.pth",
     )
     parser.add_argument(
         "--resume",
@@ -148,7 +148,9 @@ def get_args_parser():
     parser.add_argument(
         "--start_epoch", default=0, type=int, metavar="N", help="start epoch"
     )
-    parser.add_argument("--num_workers", default=10, type=int)
+
+    # Hardware parameters
+    parser.add_argument("--num_workers", default=4, type=int)
     parser.add_argument(
         "--pin_mem",
         action="store_true",
@@ -380,4 +382,4 @@ if __name__ == "__main__":
     main(args)
 
     # Run with:
-    # python main_pretrain.py --batch_size 1 --epochs 1 --accum_iter 8 --model mae_vit_large_patch16 --input_size 224 --mask_ratio 0.25 --norm_pix_loss --weight_decay 0.05 --blr 1e-4 --warmup_epochs 0 --data_path ../data/mvtec/pill/ --resume_enc d:/experiments/mae/checkpoints/mae_finetuned_vit_large.pth --num_workers 0 --resume_dec https://dl.fbaipublicfiles.com/mae/visualize/mae_visualize_vit_large_ganloss.pth
+    # python main_train.py --batch_size 1 --epochs 1 --accum_iter 8 --model mae_vit_large_patch16 --input_size 224 --mask_ratio 0.25 --norm_pix_loss --weight_decay 0.05 --blr 1e-4 --warmup_epochs 0 --data_path ../data/mvtec/pill/ --resume_enc d:/experiments/mae/checkpoints/mae_finetuned_vit_large.pth --num_workers 0 --resume_dec https://dl.fbaipublicfiles.com/mae/visualize/mae_visualize_vit_large_ganloss.pth

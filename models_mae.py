@@ -45,6 +45,7 @@ class MaskedAutoencoderViT(nn.Module):
         super().__init__()
 
         # --------------------------------------------------------------------------
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # MAE encoder specifics
         self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
         num_patches = self.patch_embed.num_patches
@@ -52,8 +53,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(
             torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False
-        )  # fixed sin-cos embedding
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
         self.img_size = img_size
         self.patch_size = patch_size
         self.patches_per_side = img_size // patch_size
@@ -64,13 +64,13 @@ class MaskedAutoencoderViT(nn.Module):
             int(1 / self.inference_mask_ratio), int(1 / (1 - self.inference_mask_ratio))
         )  # M
         assert self.patches_per_side % self.masks_per_img == 0
+
         # Since the masking is deterministic during inference, we compute the mask
         # once and store it.
         self.mask, self.ids_keep, self.ids_restore = self.get_mask(
             self.patches_per_side
         )
 
-        self.train()
         self.blocks = nn.ModuleList(
             [
                 LoraBlock(
@@ -96,7 +96,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         self.decoder_pos_embed = nn.Parameter(
             torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False
-        )  # fixed sin-cos embedding
+        )
 
         self.decoder_blocks = nn.ModuleList(
             [
@@ -132,7 +132,7 @@ class MaskedAutoencoderViT(nn.Module):
         #         requires_grad=False
         #     ).type_as(self.mask_token)
         # )
-        self.loss_map_smoother = misc.make_gaussian_kernel(4, 2).to(self.device)
+        self.loss_map_smoother = misc.make_gaussian_kernel(11, 5).to(self.device)
         self.initialize_weights()
 
     def update_loss_statistics(self, loss):
@@ -142,7 +142,6 @@ class MaskedAutoencoderViT(nn.Module):
         self.loss_sqrd_mean = self.loss_sqrd_mean * 0.99 + sqrd_loss_ * 0.01
 
     def initialize_weights(self):
-        # initialization
         # initialize (and freeze) pos_embed by sin-cos embedding
         pos_embed = get_2d_sincos_pos_embed(
             self.pos_embed.shape[-1],
@@ -164,7 +163,8 @@ class MaskedAutoencoderViT(nn.Module):
         w = self.patch_embed.proj.weight.data
         torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
 
-        # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
+        # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02)
+        # as cutoff is too big (2.)
         torch.nn.init.normal_(self.cls_token, std=0.02)
         torch.nn.init.normal_(self.mask_token, std=0.02)
 
@@ -212,10 +212,10 @@ class MaskedAutoencoderViT(nn.Module):
     @torch.no_grad()
     def get_mask(self, patches_per_side):
         len_keep = int(patches_per_side * (1 - self.inference_mask_ratio))
-        #
+
         mask = torch.diagflat(torch.ones(self.masks_per_img, device=self.device))
         mask = mask.repeat(1, patches_per_side ** 2 // self.masks_per_img)
-        assert mask.shape == (self.masks_per_img, patches_per_side ** 2)
+
         ids_mask = torch.argsort(mask, dim=1, stable=True)
         ids_restore = torch.argsort(ids_mask, dim=1, stable=True)
         ids_keep = ids_mask[..., :len_keep]
@@ -466,6 +466,22 @@ def mae_vit_huge_patch14(**kwargs):
         patch_size=14,
         embed_dim=1280,
         depth=32,
+        num_heads=16,
+        decoder_embed_dim=512,
+        decoder_depth=8,
+        decoder_num_heads=16,
+        mlp_ratio=4,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        **kwargs
+    )
+    return model
+
+
+def mae_vit_large_patch7(**kwargs):
+    model = MaskedAutoencoderViT(
+        patch_size=7,
+        embed_dim=1024,
+        depth=24,
         num_heads=16,
         decoder_embed_dim=512,
         decoder_depth=8,
