@@ -212,6 +212,15 @@ class CombinedMetricLogger(object):
         )
 
 
+def make_gaussian_kernel(radius, std_dev):
+    kernel_size = 2 * radius + 1
+    x_coord = torch.arange(kernel_size) - radius
+    x_grid, y_grid = torch.meshgrid(x_coord, x_coord, indexing='ij')
+    gaussian_kernel = torch.exp(-(x_grid ** 2 + y_grid ** 2) / (2 * std_dev ** 2))
+    gaussian_kernel /= gaussian_kernel.sum()  # Normalize to ensure sum is 1
+    return gaussian_kernel.view(1, 1, kernel_size, kernel_size)
+
+
 def setup_for_distributed(is_master):
     """
     This function disables printing when not in master process

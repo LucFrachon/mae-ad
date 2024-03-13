@@ -16,6 +16,7 @@ import torch.nn as nn
 from timm.layers import PatchEmbed
 
 from lora_layers import LoraBlock
+from util import misc
 from util.pos_embed import get_2d_sincos_pos_embed
 
 
@@ -131,6 +132,7 @@ class MaskedAutoencoderViT(nn.Module):
         #         requires_grad=False
         #     ).type_as(self.mask_token)
         # )
+        self.loss_map_smoother = misc.make_gaussian_kernel(4, 2).to(self.device)
         self.initialize_weights()
 
     def update_loss_statistics(self, loss):
@@ -393,16 +395,21 @@ class MaskedAutoencoderViT(nn.Module):
         loss = self.forward_loss(imgs, preds, masks, inference=True)
 
         preds = preds * masks.unsqueeze(-1)
+        # the predictions do not overlap with inference mask ratio = 0.25:
         preds = preds.sum(dim=1)
         preds = self.unpatchify(preds)
 
-        loss_map = self.unpatchify(loss).mean(dim=1)  # mean over 3 channels
+        loss_maps = self.unpatchify(loss).mean(dim=1)  # mean over 3 channels
+        loss_maps = torch.nn.functional.conv2d(
+            loss_maps, self.loss_map_smoother, bias=None, stride=1,
+            padding=1
+        )
 
-        ano_score = torch.sigmoid(loss_map).max().item()
-        decision = (ano_score > threshold)
+        ano_scores = torch.sigmoid(loss_maps).max().item()
+        decisions = (ano_scores > threshold)
         return {
-            "images": imgs, "preds": preds, "loss_map": loss_map,
-            "anomaly_score": ano_score, "decision": decision
+            "images": imgs, "preds": preds, "loss_maps": loss_maps,
+            "anomaly_scores": ano_scores, "decisions": decisions
         }
 
 
@@ -438,7 +445,7 @@ def mae_vit_large_patch16_dec512d8b(**kwargs):
     return model
 
 
-def mae_vit_large_patch14_dec512d8b(**kwargs):
+def mae_vit_large_patch14(**kwargs):
     model = MaskedAutoencoderViT(
         patch_size=14,
         embed_dim=1024,
@@ -454,7 +461,7 @@ def mae_vit_large_patch14_dec512d8b(**kwargs):
     return model
 
 
-def mae_vit_huge_patch14_dec512d8b(**kwargs):
+def mae_vit_huge_patch14(**kwargs):
     model = MaskedAutoencoderViT(
         patch_size=14,
         embed_dim=1280,
@@ -473,5 +480,3 @@ def mae_vit_huge_patch14_dec512d8b(**kwargs):
 # set recommended archs
 mae_vit_base_patch16 = mae_vit_base_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_large_patch16 = mae_vit_large_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
-mae_vit_large_patch14 = mae_vit_large_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
-mae_vit_huge_patch14 = mae_vit_huge_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
