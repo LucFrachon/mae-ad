@@ -38,6 +38,7 @@ class MaskedAutoencoderViT(nn.Module):
         norm_layer=nn.LayerNorm,
         norm_pix_loss=False,
         inference_mask_ratio=0.25,
+        train_mask_ratio=0.75,
         lora_rank=8,
     ):
         super().__init__()
@@ -52,11 +53,14 @@ class MaskedAutoencoderViT(nn.Module):
             torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False
         )  # fixed sin-cos embedding
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.img_size = img_size
         self.patch_size = patch_size
         self.patches_per_side = img_size // patch_size
-        self.mask_ratio = inference_mask_ratio
+        self.inference_mask_ratio = inference_mask_ratio
+        self.train_mask_ratio = train_mask_ratio
+        # used for inference:
         self.masks_per_img = max(
-            int(1 / self.mask_ratio), int(1 / (1 - self.mask_ratio))
+            int(1 / self.inference_mask_ratio), int(1 / (1 - self.inference_mask_ratio))
         )  # M
         assert self.patches_per_side % self.masks_per_img == 0
         # Since the masking is deterministic during inference, we compute the mask
@@ -65,7 +69,7 @@ class MaskedAutoencoderViT(nn.Module):
             self.patches_per_side
         )
 
-        self.eval()
+        self.train()
         self.blocks = nn.ModuleList(
             [
                 LoraBlock(
@@ -115,8 +119,25 @@ class MaskedAutoencoderViT(nn.Module):
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
-
+        # self.register_buffer(
+        #     "loss_mean", torch.zeros(
+        #         (num_patches,),
+        #         requires_grad=False
+        #     ).type_as(self.mask_token)
+        # )
+        # self.register_buffer(
+        #     "loss_sqrd_mean", torch.zeros(
+        #         (num_patches,),
+        #         requires_grad=False
+        #     ).type_as(self.mask_token)
+        # )
         self.initialize_weights()
+
+    def update_loss_statistics(self, loss):
+        loss_ = loss.detach().mean(dim=0)
+        sqrd_loss_ = torch.pow(loss_, 2).mean(dim=0)
+        self.loss_mean = self.loss_mean * 0.99 + loss_ * 0.01
+        self.loss_sqrd_mean = self.loss_sqrd_mean * 0.99 + sqrd_loss_ * 0.01
 
     def initialize_weights(self):
         # initialization
@@ -188,7 +209,7 @@ class MaskedAutoencoderViT(nn.Module):
 
     @torch.no_grad()
     def get_mask(self, patches_per_side):
-        len_keep = int(patches_per_side * (1 - self.mask_ratio))
+        len_keep = int(patches_per_side * (1 - self.inference_mask_ratio))
         #
         mask = torch.diagflat(torch.ones(self.masks_per_img, device=self.device))
         mask = mask.repeat(1, patches_per_side ** 2 // self.masks_per_img)
@@ -237,7 +258,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x_masked, mask, ids_restore
 
-    def forward_encoder(self, x, mask_ratio, inference=False):
+    def forward_encoder(self, x, inference=False):
         # append cls token
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
         cls_token_ = cls_token.clone()
@@ -257,7 +278,7 @@ class MaskedAutoencoderViT(nn.Module):
                 xi, mask_i = self.alternate_masking(xi, i)
                 ids_restore = self.ids_restore
             else:
-                xi, mask_i, ids_restore = self.random_masking(xi, mask_ratio)
+                xi, mask_i, ids_restore = self.random_masking(xi, self.train_mask_ratio)
 
             xi = torch.cat((cls_token, xi), dim=1)
             # apply Transformer blocks
@@ -331,50 +352,53 @@ class MaskedAutoencoderViT(nn.Module):
             mean = target.mean(dim=-1, keepdim=True)
             var = target.var(dim=-1, keepdim=True)
             target = (target - mean) / (var + 1.0e-6) ** 0.5
-        target_ = target.clone().unsqueeze(1).expand(-1, self.masks_per_img, -1, -1)
-        # [N, M, L], mean per patch & mask:
-        loss = ((preds - target_) ** 2).mean(dim=-1)
+
+        n_masks = self.masks_per_img if inference else 1
+        target_ = target.clone().unsqueeze(1).expand(-1, n_masks, -1, -1)
+
+        # [N, M, L, 3p^2], mean loss per image, patch, pixel & mask
+        loss = ((preds - target_) ** 2)
 
         if inference:
-            # if inference, retain loss for individual patches to be able to reconstruct
-            # the loss map
-            # loss for removed patches, per mask:
-            loss = loss * masks
-            # [N, L], mean loss over masks:
-            return loss.sum(dim=1)
+            # if inference, retain loss for individual pixels
+            loss = loss * masks.unsqueeze(-1)
+            # [N, L, 3p^2], mean over masks
+            return loss.mean(1)
 
+        # [N, M, L], mean per patch & mask:
+        loss = ((preds - target_) ** 2).mean(dim=-1)
+        # [N, L], mean per image $ patch, removed patches only:
+        loss = (loss * masks).mean(dim=1)
         # if training, compute mean loss over masks and patches to get a scalar
         # mean on removed patches, per mask:
-        loss = (loss * masks).sum(dim=-1) / masks.sum(dim=-1)
+        # self.update_loss_statistics(loss)  # update loss statistics for no-defect images
+
         # mean loss, overall:
         return loss.mean()
 
     def forward(self, imgs, mask_ratio=0.75):
         """Used during training"""
         latents, masks, ids_restore = self.forward_encoder(
-            imgs, mask_ratio, inference=False
+            imgs, inference=False
         )
         preds = self.forward_decoder(latents, ids_restore)
         loss = self.forward_loss(imgs, preds, masks, inference=False)
         return loss, preds, masks
 
+    @torch.no_grad()
     def inference(self, imgs, threshold=0.5):
+        self.eval()
         latents, masks, ids_restore = self.forward_encoder(imgs, inference=True)
         preds = self.forward_decoder(latents, ids_restore)
         loss = self.forward_loss(imgs, preds, masks, inference=True)
 
         preds = preds * masks.unsqueeze(-1)
-        preds = preds.mean(dim=1)
-        # preds = preds[:, 1, ...]
+        preds = preds.sum(dim=1)
         preds = self.unpatchify(preds)
 
-        loss_map = loss.reshape(-1, self.patches_per_side, self.patches_per_side)
-        # scale the loss map to the image's size
-        loss_map = loss_map.repeat_interleave(self.patch_size, dim=1).repeat_interleave(
-            self.patch_size, dim=2
-        )
-        loss_map = torch.sigmoid(loss_map)
-        ano_score = loss_map.max().item()
+        loss_map = self.unpatchify(loss).mean(dim=1)  # mean over 3 channels
+
+        ano_score = torch.sigmoid(loss_map).max().item()
         decision = (ano_score > threshold)
         return {
             "images": imgs, "preds": preds, "loss_map": loss_map,

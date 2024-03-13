@@ -199,6 +199,10 @@ class CombinedMetricLogger(object):
         )
 
     def log_step_to_wandb(self, global_step, epoch, metrics):
+        metrics = {}
+        for name, meter in self.meters.items():
+            metrics[name] = float(meter.avg)
+
         self.wandb_run.log(
             {
                 "step": global_step,

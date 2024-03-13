@@ -23,11 +23,11 @@ import torch
 import torch.backends.cudnn as cudnn
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
-import wandb
 from torch.utils.tensorboard import SummaryWriter
 
 import models_mae
 import util.misc as misc
+import wandb
 from engine_pretrain import train_one_epoch
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.pos_embed import interpolate_pos_embed
@@ -50,11 +50,6 @@ def get_args_parser():
         help="Accumulate gradient iterations (for increasing the effective batch size "
              "under memory constraints)",
     )
-    parser.add_argument(
-        "--pretrained", type=str,
-        help="Path to pre-trained model",
-        default=None,
-    )
 
     # Model parameters
     parser.add_argument(
@@ -73,12 +68,11 @@ def get_args_parser():
     parser.add_argument("--input_size", default=224, type=int, help="images input size")
 
     parser.add_argument(
-        "--mask_ratio",
+        "--train_mask_ratio",
         default=0.75,
         type=float,
         help="Masking ratio (percentage of removed patches).",
     )
-
     parser.add_argument(
         "--norm_pix_loss",
         action="store_true",
@@ -88,7 +82,7 @@ def get_args_parser():
 
     # Optimizer parameters
     parser.add_argument(
-        "--weight_decay", type=float, default=0.05, help="weight decay (default: 0.05)"
+        "--weight_decay", type=float, default=0.001, help="weight decay (default: 0.05)"
     )
 
     parser.add_argument(
@@ -101,7 +95,7 @@ def get_args_parser():
     parser.add_argument(
         "--blr",
         type=float,
-        default=1e-3,
+        default=1e-2,
         metavar="LR",
         help="base learning rate: absolute_lr = base_lr * total_batch_size / 256",
     )
@@ -127,24 +121,29 @@ def get_args_parser():
 
     parser.add_argument(
         "--output_dir",
-        default="./output_dir",
+        default="../output_dir",
         help="path where to save, empty for no saving",
     )
     parser.add_argument(
         "--log_dir", default="../output_dir", help="path where to tensorboard log"
     )
     parser.add_argument(
-        "--wandb_name", action="str", default=None, help="Leave empty for no wandb"
+        "--wandb_name", default=None, help="Leave empty for no wandb"
     )
     parser.add_argument(
         "--device", default="cuda", help="device to use for training / testing"
     )
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument(
-        "--resume_enc", default="", help="resume encoder from checkpoint"
+        "--pretrained",
+        type=str,
+        help="Path to pre-trained model (weights only)",
+        default=None,
     )
     parser.add_argument(
-        "--resume_dec", default="", help="resume decoder from checkpoint"
+        "--resume",
+        default="",
+        help="resume from checkpoint (weights and optimizer)"
     )
     parser.add_argument(
         "--start_epoch", default=0, type=int, metavar="N", help="start epoch"
@@ -342,7 +341,7 @@ def main(args):
             log_writer=log_writer,
             args=args,
         )
-        if args.output_dir and (epoch % 100 == 0 or epoch + 1 == args.epochs):
+        if args.output_dir and (epoch % 200 == 0 or epoch + 1 == args.epochs):
             misc.save_model(
                 args=args,
                 model=model,

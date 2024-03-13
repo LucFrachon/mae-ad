@@ -58,7 +58,7 @@ def train_one_epoch(
             samples, targets = mixup_fn(samples, targets)
 
         with torch.cuda.amp.autocast():
-            outputs = model(samples)
+            outputs = model(samples, mask_ratio=args.train_mask_ratio)
             loss = criterion(outputs, targets)
 
         loss_value = loss.item()

@@ -29,6 +29,13 @@ def train_one_epoch(
     kwargs = misc.get_wandb_kwargs(args)
     metric_logger = misc.CombinedMetricLogger(delimiter="  ", **kwargs)
     metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    # metric_logger.add_meter(
+    #     'patch_loss_mean', misc.SmoothedValue(window_size=1, fmt='{value:.6f}')
+    # )
+    # metric_logger.add_meter(
+    #     'patch_loss_std', misc.SmoothedValue(window_size=1, fmt='{value:.6f}')
+    # )
+
     print_freq = 20
 
     accum_iter = args.accum_iter
@@ -51,7 +58,7 @@ def train_one_epoch(
         samples = samples.to(device, non_blocking=True)
 
         with torch.cuda.amp.autocast():
-            loss, _, _ = model(samples, mask_ratio=args.mask_ratio)
+            loss, _, _ = model(samples, mask_ratio=args.train_mask_ratio)
 
         loss_value = loss.item()
 
@@ -70,6 +77,11 @@ def train_one_epoch(
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
+        metric_logger.update(patch_loss_mean=model.loss_mean.mean().item())
+        variance = model.loss_sqrd_mean - model.loss_mean ** 2
+        metric_logger.update(
+            patch_loss_std=torch.sqrt(torch.clamp(variance, min=0)).mean().item()
+        )
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
