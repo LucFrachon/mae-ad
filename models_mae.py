@@ -363,17 +363,18 @@ class MaskedAutoencoderViT(nn.Module):
 
         if inference:
             # if inference, retain loss for individual pixels
-            loss = loss * masks.unsqueeze(-1)
             # [N, L, 3p^2], mean over masks
-            return loss.mean(1)
+
+            loss = (loss * masks.unsqueeze(-1)).sum(1) / (masks.unsqueeze(-1).sum(1))
+            return loss
 
         # [N, M, L], mean per patch & mask:
         loss = ((preds - target_) ** 2).mean(dim=-1)
         # [N, L], mean per image $ patch, removed patches only:
-        loss = (loss * masks).mean(dim=1)
+        loss = (loss * masks).sum(1) / masks.sum(1)
         # if training, compute mean loss over masks and patches to get a scalar
         # mean on removed patches, per mask:
-        # self.update_loss_statistics(loss)  # update loss statistics for no-defect images
+        # self.update_loss_statistics(loss)  # update loss stats for no-defect images
 
         # mean loss, overall:
         return loss.mean()
@@ -388,7 +389,7 @@ class MaskedAutoencoderViT(nn.Module):
         return loss, preds, masks
 
     @torch.no_grad()
-    def inference(self, imgs, threshold=0.5):
+    def inference(self, imgs, threshold=0.5, pixel_map=False):
         self.eval()
         latents, masks, ids_restore = self.forward_encoder(imgs, inference=True)
         preds = self.forward_decoder(latents, ids_restore)
@@ -399,17 +400,27 @@ class MaskedAutoencoderViT(nn.Module):
         preds = preds.sum(dim=1)
         preds = self.unpatchify(preds)
 
-        loss_maps = self.unpatchify(loss).mean(dim=1)  # mean over 3 channels
-        loss_maps = torch.nn.functional.conv2d(
-            loss_maps, self.loss_map_smoother, bias=None, stride=1,
-            padding=1
-        )
+        if pixel_map:
+            loss_maps = self.unpatchify(loss).mean(dim=1)  # mean over 3 channels
+            loss_maps = torch.nn.functional.conv2d(
+                loss_maps, self.loss_map_smoother, bias=None, stride=1,
+                padding=1
+            )
+        else:  # patch map
+            # loss is [N, L, 3p^2], compute mean per patch and extend size:
+            loss_maps = loss.mean(dim=-1, keepdim=True).repeat(
+                1, 1, 3 * self.patch_size ** 2
+            )
+            # mean over 3 channels:
+            loss_maps = self.unpatchify(loss_maps).mean(1)
 
-        ano_scores = torch.sigmoid(loss_maps).max().item()
+        ano_scores = loss_maps.max().detach().item()
         decisions = (ano_scores > threshold)
         return {
-            "images": imgs, "preds": preds, "loss_maps": loss_maps,
-            "anomaly_scores": ano_scores, "decisions": decisions
+            "images": imgs.detach().cpu(), "preds": preds.detach().cpu(),
+            "loss_maps": loss_maps.detach().cpu(),
+            "anomaly_scores": ano_scores,
+            "decisions": decisions
         }
 
 

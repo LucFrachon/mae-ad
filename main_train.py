@@ -213,16 +213,17 @@ def main(args):
     cudnn.benchmark = True
 
     # simple augmentation
+    resize_size = int(args.input_size * 1.035)  # 224 --> 232
+    assert resize_size == 232
     transform_train = transforms.Compose(
         [
-            transforms.Resize((args.input_size, args.input_size)),
-            # transforms.RandomResizedCrop(
-            #     args.input_size,
-            #     scale=(0.2, 1.0),
-            #     interpolation=transforms.InterpolationMode.BICUBIC,
-            # ),  # 3 is bicubic
-            # transforms.RandomHorizontalFlip(),
+            transforms.Resize(
+                (resize_size, resize_size),
+                interpolation=transforms.InterpolationMode.BICUBIC
+            ),
+            transforms.RandomCrop(args.input_size),
             transforms.ToTensor(),
+            transforms.ColorJitter(brightness=(0.98, 1.02), saturation=(0.98, 1.02)),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
