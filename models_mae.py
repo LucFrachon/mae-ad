@@ -356,7 +356,7 @@ class MaskedAutoencoderViT(nn.Module):
             target = (target - mean) / (var + 1.0e-6) ** 0.5
 
         n_masks = self.masks_per_img if inference else 1
-        target_ = target.clone().unsqueeze(1).expand(-1, n_masks, -1, -1)
+        target_ = target.unsqueeze(1).repeat(1, n_masks, 1, 1)
 
         # [N, M, L, 3p^2], mean loss per image, patch, pixel & mask
         loss = ((preds - target_) ** 2)
@@ -370,8 +370,8 @@ class MaskedAutoencoderViT(nn.Module):
 
         # [N, M, L], mean per patch & mask:
         loss = ((preds - target_) ** 2).mean(dim=-1)
-        # [N, L], mean per image $ patch, removed patches only:
-        loss = (loss * masks).sum(1) / masks.sum(1)
+        # [N, L], mean per image, removed patches only:
+        loss = (loss * masks).sum(dim=(1, 2)) / masks.sum(dim=(1, 2))
         # if training, compute mean loss over masks and patches to get a scalar
         # mean on removed patches, per mask:
         # self.update_loss_statistics(loss)  # update loss stats for no-defect images

@@ -54,7 +54,7 @@ def get_args_parser():
     # Model parameters
     parser.add_argument(
         "--model",
-        default="mae_vit_large_patch14",
+        default="mae_vit_large_patch7",
         type=str,
         metavar="MODEL",
         help="Name of model to train",
@@ -121,11 +121,11 @@ def get_args_parser():
 
     parser.add_argument(
         "--output_dir",
-        default="../output_dir",
+        default="../output_test",
         help="path where to save, empty for no saving",
     )
     parser.add_argument(
-        "--log_dir", default="../output_dir", help="path where to tensorboard log"
+        "--log_dir", default="../output_test", help="path where to tensorboard log"
     )
     parser.add_argument(
         "--wandb_name", default=None, help="Leave empty for no wandb"
@@ -213,8 +213,7 @@ def main(args):
     cudnn.benchmark = True
 
     # simple augmentation
-    resize_size = int(args.input_size * 1.035)  # 224 --> 232
-    assert resize_size == 232
+    resize_size = round(args.input_size * 1.035)  # 224 --> 232 if using default size
     transform_train = transforms.Compose(
         [
             transforms.Resize(
@@ -382,5 +381,9 @@ if __name__ == "__main__":
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
 
-    # Run with:
-    # python main_train.py --batch_size 1 --epochs 1 --accum_iter 8 --model mae_vit_large_patch16 --input_size 224 --mask_ratio 0.25 --norm_pix_loss --weight_decay 0.05 --blr 1e-4 --warmup_epochs 0 --data_path ../data/mvtec/pill/ --resume_enc d:/experiments/mae/checkpoints/mae_finetuned_vit_large.pth --num_workers 0 --resume_dec https://dl.fbaipublicfiles.com/mae/visualize/mae_visualize_vit_large_ganloss.pth
+    # Run with, for instance:
+    # python main_train.py --epochs 5 --model mae_vit_large_patch7 --freeze_non_lora \
+    #   --weight_decay 0.001 --blr 1e-2 --norm_pix_loss --warmup_epochs 1 \
+    #   --pretrained ../checkpoints/mae_pretrain_vit_large.pth --num_workers 4 \
+    #   --output_dir ../output_test --log_dir ../output_test \
+    #   --wandb_name "test"

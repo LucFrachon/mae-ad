@@ -116,7 +116,7 @@ To train the model, run `main_pretrain.py` with any relevant arguments. For exam
 
 ```bash
 python main_train.py --epochs 4000 --model mae_vit_large_patch7 --freeze_non_lora --blr 1e-2 \
-  --output_dir ../output_p7_ep4000 --log_dir ../output_p7_ep4000 --wandb_name p7_ep4000 \
+  --norm_pix_loss --output_dir ../output_p7_ep4000 --log_dir ../output_p7_ep4000 --wandb_name p7_ep4000 \
   --pretrained ../checkpoints/mae_pretrain_vit_large.pth
 ```
 
