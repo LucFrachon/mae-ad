@@ -82,8 +82,23 @@ More specifically, I used the "capsule" subset. The training split contains only
 test split contains both normal and defective samples with 5 types of defects (crack, poke, print, scratch, squeeze).
 
 The data loader expects a per-class directory structure. Since we're not interested in classifying the defects, we only
-need 2 classes: good and bad. However, the file names within defect classes are the same, so you need to rename them
-to avoid conflicts (e.g., `crack/000.png` --> `bad/crack_000.png`). **[TODO: Provide a script to do this]**
+need 2 classes: good and bad. However, the file names within defect classes are the same, so we need to rename them
+to avoid conflicts (e.g., `crack/000.png` --> `bad/crack_000.png`).
+
+The file `util/mvtec_folders.py` performs this renaming and reorganisation:
+
+- First, copy the MVTec folder of interest (e.g., `capsule`, `transistor`, etc.) to your data root.
+- Then run:
+
+   ```bash
+   python util/mvtec_folders.py --data_root <object_folder>  
+   ```
+
+where `<object_root>` is the root directory of the MVTec AD dataset for the object of interest. It might
+look like `../data/capsule/`, for instance.
+
+The resulting folder structure is as follows (the defect names are from the `capsule` subset and would be different for
+other objects):
 
 ```  
 <data_root>
@@ -117,31 +132,34 @@ To train the model, run `main_pretrain.py` with any relevant arguments. For exam
 ```bash
 python main_train.py --epochs 4000 --model mae_vit_large_patch7 --freeze_non_lora --blr 1e-2 \
   --norm_pix_loss --output_dir ../output_p7_ep4000 --log_dir ../output_p7_ep4000 --wandb_name p7_ep4000 \
-  --pretrained ../checkpoints/mae_pretrain_vit_large.pth
+  --pretrained ../checkpoints/mae_pretrain_vit_large.pth --pin_mem
 ```
 
 Besides paths to the data and the outputs and logs, the default values should work in most cases. Here are the main ones
 you might want to play with:
 
-| Argument          | Description             | Type  | Default              | Remarks                                      |
-|-------------------|-------------------------|-------|----------------------|----------------------------------------------|
-| --model           | Model name              | str   | mae_vit_large_patch7 | Default model: 32x32 patches of size 7x7     |
-| --epochs          | Number of epochs        | int   | 4000                 |                                              |
-| --batch_size      | Batch size per GPU      | int   | 32                   | Adjust according to your GPU.                |
-| --accum_iter      | Gradient accumulation   | int   | 1                    | Values > 1 increase the effective batch size |
-| --freeze_non_lora | Freeze non-Lora weights | bool  | False                |                                              |
-| --weight_decay    | Weight decay factor     | float | 0.001                |                                              |
-| --blr             | Learning rate           | float | 1e-3                 | Effective LR is blr * eff. batch sz / 256    |
-| --pretrained      | Pretrained weights      | str   | None                 | Path to a pretrained encoder                 |
-| --resume          | Resume training         | str   | None                 | Path to a checkpoint (full autoencoder)      |
-| --start_epoch     | Start epoch if resuming | int   | 0                    | Only required with `resume`                  |
-| --output_dir      | Output directory        | str   | ../output_dir        |                                              |
-| --log_dir         | Log directory           | str   | ../output_dir        |                                              |
-| --wandb_name      | Wandb run name          | str   | None                 | If None, no Wandb logging                    |
-| --num_workers     | Data loader workers     | int   | 4                    |                                              |
+| Argument          | Description                    | Type  | Default              | Remarks                                      |
+|-------------------|--------------------------------|-------|----------------------|----------------------------------------------|
+| --model           | Model name                     | str   | mae_vit_large_patch7 | Default model: 32x32 patches of size 7x7     |
+| --epochs          | Number of epochs               | int   | 4000                 |                                              |
+| --batch_size      | Batch size per GPU             | int   | 32                   | Adjust according to your GPU.                |
+| --accum_iter      | Gradient accumulation          | int   | 1                    | Values > 1 increase the effective batch size |
+| --freeze_non_lora | Freeze non-Lora weights (flag) | bool  |                      |                                              |
+| --lora_rank       | LoRA rank                      | int   | 4                    | Rank of the adaptation layers in Transformer |
+| --weight_decay    | Weight decay factor            | float | 0.001                |                                              |
+| --blr             | Learning rate                  | float | 1e-3                 | Effective LR is blr * eff. batch sz / 256    |
+| --pretrained      | Pretrained weights             | str   | None                 | Path to a pretrained encoder                 |
+| --resume          | Resume training                | str   | None                 | Path to a checkpoint (full autoencoder)      |
+| --start_epoch     | Start epoch if resuming        | int   | 0                    | Only required with `resume`                  |
+| --output_dir      | Output directory               | str   | ../output_dir        |                                              |
+| --log_dir         | Log directory                  | str   | ../output_dir        |                                              |
+| --wandb_name      | Wandb run name                 | str   | None                 | If None, no Wandb logging                    |
+| --num_workers     | Data loader workers            | int   | 4                    | Number of workers in the dataloader          |
+| --pin_mem         | Pin memory (flag)              | bool  |                      | Can help with performance on some systems    |
 
 These models need to train for a relatively long time. The loss decreases slowly but steadily. Since the dataset is
-small, many epochs are required. With 4000 epochs, training should take roughly half a day on a reasonably fast GPU.
+small, many epochs are required. With 4000 epochs, training should take a few hours on a reasonably fast GPU if you set
+`--num_workers` and `--pin_mem` correctly.
 
 ### Inference
 
@@ -149,9 +167,8 @@ small, many epochs are required. With 4000 epochs, training should take roughly 
 
 ## TODOs
 
-- Provide a script to rename defect images and set up the expected folder structure.
 - Write inference and evaluation code.
-- Clean up the repo - remove unnecessary files inherited from the original MAE repo.
+- Check coverage and clean up the repo - remove unnecessary files inherited from the original MAE repo.
 
 ## References
 

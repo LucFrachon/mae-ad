@@ -63,7 +63,7 @@ def get_args_parser():
         "--freeze_non_lora", action="store_true", help="Freeze non-lora weights"
     )
     parser.add_argument(
-        "--lora_rank", default=8, type=int, help="Rank of LoRA decomposition"
+        "--lora_rank", default=4, type=int, help="Rank of LoRA decomposition"
     )
     parser.add_argument("--input_size", default=224, type=int, help="images input size")
 
@@ -114,7 +114,7 @@ def get_args_parser():
     # Dataset parameters
     parser.add_argument(
         "--data_path",
-        default="../data/capsule",
+        default="../data/transistor/",
         type=str,
         help="dataset path",
     )
@@ -254,6 +254,8 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        prefetch_factor=4,
+        persistent_workers=True,
     )
 
     # define the model
@@ -289,6 +291,9 @@ def main(args):
         lora.mark_only_lora_as_trainable(model.blocks)
         lora.mark_only_lora_as_trainable(model.decoder_blocks)
 
+    # print trainable parameter count:
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print("Number of trainable parameters: %d" % num_params)
     model.to(device)
 
     model_without_ddp = model

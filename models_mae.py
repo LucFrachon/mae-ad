@@ -391,8 +391,19 @@ class MaskedAutoencoderViT(nn.Module):
     @torch.no_grad()
     def inference(self, imgs, threshold=0.5, pixel_map=False):
         self.eval()
+
         latents, masks, ids_restore = self.forward_encoder(imgs, inference=True)
         preds = self.forward_decoder(latents, ids_restore)
+
+        # # Compute pixel norm stats
+        if self.norm_pix_loss:
+            preds_unnormed = preds.clone()
+            target = self.patchify(imgs)  # (N, L, p * p * 3)
+            mean = target.mean(dim=-1, keepdim=True)
+            var = target.var(dim=-1, keepdim=True)
+            preds = (preds + mean) * ((var + 1.0e-6) ** 0.5)
+            del target
+
         loss = self.forward_loss(imgs, preds, masks, inference=True)
 
         preds = preds * masks.unsqueeze(-1)
@@ -402,9 +413,13 @@ class MaskedAutoencoderViT(nn.Module):
 
         if pixel_map:
             loss_maps = self.unpatchify(loss).mean(dim=1)  # mean over 3 channels
-            loss_maps = torch.nn.functional.conv2d(
-                loss_maps, self.loss_map_smoother, bias=None, stride=1,
-                padding=1
+            loss_maps = 2 * (
+                    torch.sigmoid(
+                        torch.nn.functional.conv2d(
+                            loss_maps, self.loss_map_smoother, bias=None, stride=1,
+                            padding=1
+                        )
+                    ) - 0.5
             )
         else:  # patch map
             # loss is [N, L, 3p^2], compute mean per patch and extend size:
@@ -412,16 +427,26 @@ class MaskedAutoencoderViT(nn.Module):
                 1, 1, 3 * self.patch_size ** 2
             )
             # mean over 3 channels:
-            loss_maps = self.unpatchify(loss_maps).mean(1)
+            loss_maps = 2 * (torch.sigmoid(self.unpatchify(loss_maps).mean(1)) - 0.5)
 
         ano_scores = loss_maps.max().detach().item()
         decisions = (ano_scores > threshold)
-        return {
-            "images": imgs.detach().cpu(), "preds": preds.detach().cpu(),
+        return_dict = {
+            "images": imgs.detach().cpu(),
+            "preds": preds.detach().cpu(),
             "loss_maps": loss_maps.detach().cpu(),
             "anomaly_scores": ano_scores,
             "decisions": decisions
         }
+        
+        if self.norm_pix_loss:
+            preds_unnormed = preds_unnormed * masks.unsqueeze(-1)
+            # the predictions do not overlap with inference mask ratio = 0.25:
+            preds_unnormed = preds_unnormed.sum(dim=1)
+            preds_unnormed = self.unpatchify(preds_unnormed)
+            return_dict["preds_unnormed"] = preds_unnormed.detach().cpu()
+
+        return return_dict
 
 
 def mae_vit_base_patch16_dec512d8b(**kwargs):
