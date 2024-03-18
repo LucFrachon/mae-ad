@@ -138,24 +138,24 @@ python main_train.py --epochs 4000 --model mae_vit_large_patch7 --freeze_non_lor
 Besides paths to the data and the outputs and logs, the default values should work in most cases. Here are the main ones
 you might want to play with:
 
-| Argument          | Description                    | Type  | Default              | Remarks                                      |
-|-------------------|--------------------------------|-------|----------------------|----------------------------------------------|
-| --model           | Model name                     | str   | mae_vit_large_patch7 | Default model: 32x32 patches of size 7x7     |
-| --epochs          | Number of epochs               | int   | 4000                 |                                              |
-| --batch_size      | Batch size per GPU             | int   | 32                   | Adjust according to your GPU.                |
-| --accum_iter      | Gradient accumulation          | int   | 1                    | Values > 1 increase the effective batch size |
-| --freeze_non_lora | Freeze non-Lora weights (flag) | bool  |                      |                                              |
-| --lora_rank       | LoRA rank                      | int   | 4                    | Rank of the adaptation layers in Transformer |
-| --weight_decay    | Weight decay factor            | float | 0.001                |                                              |
-| --blr             | Learning rate                  | float | 1e-3                 | Effective LR is blr * eff. batch sz / 256    |
-| --pretrained      | Pretrained weights             | str   | None                 | Path to a pretrained encoder                 |
-| --resume          | Resume training                | str   | None                 | Path to a checkpoint (full autoencoder)      |
-| --start_epoch     | Start epoch if resuming        | int   | 0                    | Only required with `resume`                  |
-| --output_dir      | Output directory               | str   | ../output_dir        |                                              |
-| --log_dir         | Log directory                  | str   | ../output_dir        |                                              |
-| --wandb_name      | Wandb run name                 | str   | None                 | If None, no Wandb logging                    |
-| --num_workers     | Data loader workers            | int   | 4                    | Number of workers in the dataloader          |
-| --pin_mem         | Pin memory (flag)              | bool  |                      | Can help with performance on some systems    |
+| Argument          | Description                    | Type  | Default              | Remarks                                                                                       |
+|-------------------|--------------------------------|-------|----------------------|-----------------------------------------------------------------------------------------------|
+| --model           | Model name                     | str   | mae_vit_large_patch7 | Default model: 32x32 patches of size 7x7                                                      |
+| --epochs          | Number of epochs               | int   | 4000                 |                                                                                               |
+| --batch_size      | Batch size per GPU             | int   | 32                   | Adjust according to your GPU.                                                                 |
+| --accum_iter      | Gradient accumulation          | int   | 1                    | Values > 1 increase the effective batch size                                                  |
+| --freeze_non_lora | Freeze non-Lora weights (flag) | bool  |                      |                                                                                               |
+| --lora_rank       | LoRA rank                      | int   | 4                    | Rank of the adaptation layers in Transformer                                                  |
+| --weight_decay    | Weight decay factor            | float | 0.001                |                                                                                               |
+| --blr             | Learning rate                  | float | 5e-3                 | Effective LR is blr * eff. batch sz / 256                                                     |
+| --pretrained      | Pretrained weights             | str   | None                 | Path to a pretrained encoder (recommended, e.g., `../checkpoints/mae_pretrain_vit_large.pth`) |
+| --resume          | Resume training                | str   | None                 | Path to a checkpoint (full autoencoder). Use to continue a previous training run.             |
+| --start_epoch     | Start epoch if resuming        | int   | 0                    | Only required with `resume`                                                                   |
+| --output_dir      | Output directory               | str   | ../output_test       |                                                                                               |
+| --log_dir         | Log directory                  | str   | ../output_test       |                                                                                               |
+| --wandb_name      | Wandb run name                 | str   | None                 | If None, no Wandb logging                                                                     |
+| --num_workers     | Data loader workers            | int   | 4                    | Number of workers in the dataloader                                                           |
+| --pin_mem         | Pin memory (flag)              | bool  |                      | Can help with performance on some systems                                                     |
 
 These models need to train for a relatively long time. The loss decreases slowly but steadily. Since the dataset is
 small, many epochs are required. With 4000 epochs, training should take a few hours on a reasonably fast GPU if you set

@@ -95,7 +95,7 @@ def get_args_parser():
     parser.add_argument(
         "--blr",
         type=float,
-        default=1e-2,
+        default=5e-3,
         metavar="LR",
         help="base learning rate: absolute_lr = base_lr * total_batch_size / 256",
     )
@@ -212,8 +212,8 @@ def main(args):
 
     cudnn.benchmark = True
 
-    # simple augmentation
-    resize_size = round(args.input_size * 1.035)  # 224 --> 232 if using default size
+    # simple augmentation: add a little jiggle and color jitter
+    resize_size = round(args.input_size * 1.045)  # 224 --> 234 if using default size
     transform_train = transforms.Compose(
         [
             transforms.Resize(
