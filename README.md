@@ -168,7 +168,6 @@ small, many epochs are required. With 4000 epochs, training should take a few ho
 ## TODOs
 
 - Write inference and evaluation code.
-- Check coverage and clean up the repo - remove unnecessary files inherited from the original MAE repo.
 
 ## References
 
